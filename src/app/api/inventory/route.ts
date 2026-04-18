@@ -1,21 +1,36 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { createClient } from "@/lib/supabase/server";
 
 export async function GET() {
-  const items = await prisma.inventoryItem.findMany({
-    orderBy: [{ status: "asc" }, { createdAt: "desc" }],
-  });
-  return NextResponse.json(items);
+  const supabase = createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { data, error } = await supabase
+    .from("inventory_items")
+    .select("*")
+    .eq("user_id", user.id)
+    .order("status", { ascending: true })
+    .order("created_at", { ascending: false });
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json(data);
 }
 
 export async function POST(req: Request) {
-  const body = await req.json();
-  const { name, quantity } = body;
-  if (!name?.trim()) {
-    return NextResponse.json({ error: "Name required" }, { status: 400 });
-  }
-  const item = await prisma.inventoryItem.create({
-    data: { name: name.trim(), quantity: quantity?.trim() || null },
-  });
-  return NextResponse.json(item, { status: 201 });
+  const supabase = createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { name, quantity } = await req.json();
+  if (!name?.trim()) return NextResponse.json({ error: "Name required" }, { status: 400 });
+
+  const { data, error } = await supabase.from("inventory_items").insert({
+    user_id: user.id,
+    name: name.trim(),
+    quantity: quantity?.trim() || null,
+  }).select().single();
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json(data, { status: 201 });
 }

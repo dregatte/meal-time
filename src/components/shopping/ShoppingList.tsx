@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { CheckCircle2, Circle, RefreshCw } from "lucide-react";
-import type { ShoppingGroup } from "@/lib/shopping";
+interface ShoppingGroup { recipeName: string; items: { name: string; quantity: string; unit: string }[]; }
 
 function getMondayOfWeek(): string {
   const d = new Date();

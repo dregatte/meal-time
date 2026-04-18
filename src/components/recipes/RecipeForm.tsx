@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { Wand2, ImagePlus, Plus, Minus, X } from "lucide-react";
+import { Wand2, ImagePlus, Plus, Minus, X, Loader2 } from "lucide-react";
 import type { Ingredient, ParsedRecipe, RecipeRow } from "@/types";
 
 interface Props {
@@ -24,36 +24,52 @@ const EMPTY: ParsedRecipe = {
 export default function RecipeForm({ initial, onSave, onCancel }: Props) {
   const [form, setForm] = useState<ParsedRecipe>(() => {
     if (!initial) return EMPTY;
-    let ingredients: Ingredient[] = [];
-    let method: string[] = [];
-    try { ingredients = JSON.parse(initial.ingredients); } catch {}
-    try { method = JSON.parse(initial.method); } catch {}
     return {
       name: initial.name,
       description: initial.description ?? "",
-      ingredients: ingredients.length ? ingredients : EMPTY.ingredients,
-      method: method.length ? method : EMPTY.method,
-      prepMins: initial.prepMins,
-      cookMins: initial.cookMins,
+      ingredients: initial.ingredients?.length ? initial.ingredients : EMPTY.ingredients,
+      method: initial.method?.length ? initial.method : EMPTY.method,
+      prepMins: initial.prep_mins,
+      cookMins: initial.cook_mins,
       servings: initial.servings,
-      tags: initial.tags ? initial.tags.split(",").filter(Boolean) : [],
+      tags: initial.tags ?? [],
     };
   });
-  const [photo, setPhoto] = useState<string | null>(initial?.photoBase64 ?? null);
+  const [photoUrl, setPhotoUrl] = useState<string | null>(initial?.photo_url ?? null);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(initial?.photo_url ?? null);
   const [pasteText, setPasteText] = useState("");
   const [parsing, setParsing] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [tagInput, setTagInput] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
+  async function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    // Show preview immediately
+    const reader = new FileReader();
+    reader.onload = (ev) => setPhotoPreview(ev.target?.result as string);
+    reader.readAsDataURL(file);
+
+    // Upload to Supabase Storage
+    setUploading(true);
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await fetch("/api/recipes/upload", { method: "POST", body: fd });
+    const { url, error } = await res.json();
+    if (!error) setPhotoUrl(url);
+    setUploading(false);
+  }
+
   async function handleParseAI() {
-    if (!photo && !pasteText.trim()) return;
+    if (!photoPreview && !pasteText.trim()) return;
     setParsing(true);
     try {
       const res = await fetch("/api/recipes/parse", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageBase64: photo, text: pasteText }),
+        body: JSON.stringify({ imageBase64: photoPreview, text: pasteText }),
       });
       const parsed: ParsedRecipe = await res.json();
       setForm({
@@ -67,29 +83,14 @@ export default function RecipeForm({ initial, onSave, onCancel }: Props) {
     }
   }
 
-  function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => setPhoto(ev.target?.result as string);
-    reader.readAsDataURL(file);
-  }
-
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
     if (!form.name.trim()) return;
     setSaving(true);
-    const body = {
-      ...form,
-      ingredients: JSON.stringify(form.ingredients),
-      method: JSON.stringify(form.method),
-      tags: form.tags,
-      photoBase64: photo,
-    };
     await fetch(initial ? `/api/recipes/${initial.id}` : "/api/recipes", {
       method: initial ? "PUT" : "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ ...form, photoUrl }),
     });
     setSaving(false);
     onSave();
@@ -103,38 +104,27 @@ export default function RecipeForm({ initial, onSave, onCancel }: Props) {
     });
   }
 
-  function setStep(i: number, val: string) {
-    setForm((f) => {
-      const m = [...f.method];
-      m[i] = val;
-      return { ...f, method: m };
-    });
-  }
-
   return (
     <form onSubmit={handleSave} className="p-4 space-y-5">
       {/* Photo + AI parse */}
       <div className="space-y-2">
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <button
             type="button"
             onClick={() => fileRef.current?.click()}
             className="flex items-center gap-2 text-sm border border-dashed border-gray-300 rounded-xl px-3 py-2 text-gray-500 hover:border-orange-400 hover:text-orange-500 transition-colors"
           >
-            <ImagePlus size={16} />
-            {photo ? "Change photo" : "Add photo"}
+            {uploading ? <Loader2 size={16} className="animate-spin" /> : <ImagePlus size={16} />}
+            {photoPreview ? "Change photo" : "Add photo"}
           </button>
           <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoChange} />
         </div>
-        {photo && (
+        {photoPreview && (
           <div className="relative w-full h-36">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={photo} alt="preview" className="w-full h-36 object-cover rounded-xl" />
-            <button
-              type="button"
-              onClick={() => setPhoto(null)}
-              className="absolute top-2 right-2 bg-black/50 text-white rounded-full p-1"
-            >
+            <img src={photoPreview} alt="preview" className="w-full h-36 object-cover rounded-xl" />
+            <button type="button" onClick={() => { setPhotoPreview(null); setPhotoUrl(null); }}
+              className="absolute top-2 right-2 bg-black/50 text-white rounded-full p-1">
               <X size={14} />
             </button>
           </div>
@@ -149,7 +139,7 @@ export default function RecipeForm({ initial, onSave, onCancel }: Props) {
         <button
           type="button"
           onClick={handleParseAI}
-          disabled={parsing || (!photo && !pasteText.trim())}
+          disabled={parsing || (!photoPreview && !pasteText.trim())}
           className="flex items-center gap-2 text-sm bg-violet-100 text-violet-700 px-4 py-2 rounded-xl hover:bg-violet-200 disabled:opacity-40 transition-colors"
         >
           <Wand2 size={15} />
@@ -160,8 +150,7 @@ export default function RecipeForm({ initial, onSave, onCancel }: Props) {
       {/* Name */}
       <div>
         <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Recipe Name *</label>
-        <input
-          required
+        <input required
           className="mt-1 w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
           value={form.name}
           onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
@@ -173,41 +162,27 @@ export default function RecipeForm({ initial, onSave, onCancel }: Props) {
         <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Description</label>
         <textarea
           className="mt-1 w-full border border-gray-200 rounded-xl px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-orange-300"
-          rows={2}
-          value={form.description}
+          rows={2} value={form.description}
           onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
         />
       </div>
 
       {/* Times + servings */}
       <div className="flex gap-3">
-        <div className="flex-1">
-          <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Prep (min)</label>
-          <input
-            type="number" min={0}
-            className="mt-1 w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
-            value={form.prepMins}
-            onChange={(e) => setForm((f) => ({ ...f, prepMins: parseInt(e.target.value) || 0 }))}
-          />
-        </div>
-        <div className="flex-1">
-          <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Cook (min)</label>
-          <input
-            type="number" min={0}
-            className="mt-1 w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
-            value={form.cookMins}
-            onChange={(e) => setForm((f) => ({ ...f, cookMins: parseInt(e.target.value) || 0 }))}
-          />
-        </div>
-        <div className="flex-1">
-          <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Servings</label>
-          <input
-            type="number" min={1}
-            className="mt-1 w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
-            value={form.servings}
-            onChange={(e) => setForm((f) => ({ ...f, servings: parseInt(e.target.value) || 1 }))}
-          />
-        </div>
+        {[
+          { label: "Prep (min)", key: "prepMins" as const },
+          { label: "Cook (min)", key: "cookMins" as const },
+          { label: "Servings", key: "servings" as const },
+        ].map(({ label, key }) => (
+          <div key={key} className="flex-1">
+            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{label}</label>
+            <input type="number" min={key === "servings" ? 1 : 0}
+              className="mt-1 w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
+              value={form[key]}
+              onChange={(e) => setForm((f) => ({ ...f, [key]: parseInt(e.target.value) || 0 }))}
+            />
+          </div>
+        ))}
       </div>
 
       {/* Ingredients */}
@@ -216,38 +191,19 @@ export default function RecipeForm({ initial, onSave, onCancel }: Props) {
         <div className="mt-1 space-y-2">
           {form.ingredients.map((ing, i) => (
             <div key={i} className="flex gap-2">
-              <input
-                className="w-16 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-orange-300"
-                placeholder="Qty"
-                value={ing.quantity}
-                onChange={(e) => setIngredient(i, "quantity", e.target.value)}
-              />
-              <input
-                className="w-16 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-orange-300"
-                placeholder="Unit"
-                value={ing.unit}
-                onChange={(e) => setIngredient(i, "unit", e.target.value)}
-              />
-              <input
-                className="flex-1 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-orange-300"
-                placeholder="Ingredient"
-                value={ing.name}
-                onChange={(e) => setIngredient(i, "name", e.target.value)}
-              />
-              <button
-                type="button"
-                onClick={() => setForm((f) => ({ ...f, ingredients: f.ingredients.filter((_, j) => j !== i) }))}
-                className="text-gray-300 hover:text-red-400"
-              >
-                <Minus size={16} />
-              </button>
+              <input className="w-16 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-orange-300"
+                placeholder="Qty" value={ing.quantity} onChange={(e) => setIngredient(i, "quantity", e.target.value)} />
+              <input className="w-16 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-orange-300"
+                placeholder="Unit" value={ing.unit} onChange={(e) => setIngredient(i, "unit", e.target.value)} />
+              <input className="flex-1 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-orange-300"
+                placeholder="Ingredient" value={ing.name} onChange={(e) => setIngredient(i, "name", e.target.value)} />
+              <button type="button" onClick={() => setForm((f) => ({ ...f, ingredients: f.ingredients.filter((_, j) => j !== i) }))}
+                className="text-gray-300 hover:text-red-400"><Minus size={16} /></button>
             </div>
           ))}
-          <button
-            type="button"
+          <button type="button"
             onClick={() => setForm((f) => ({ ...f, ingredients: [...f.ingredients, { name: "", quantity: "", unit: "" }] }))}
-            className="text-sm text-orange-500 flex items-center gap-1 hover:text-orange-600"
-          >
+            className="text-sm text-orange-500 flex items-center gap-1 hover:text-orange-600">
             <Plus size={14} /> Add ingredient
           </button>
         </div>
@@ -260,26 +216,15 @@ export default function RecipeForm({ initial, onSave, onCancel }: Props) {
           {form.method.map((step, i) => (
             <div key={i} className="flex gap-2 items-start">
               <span className="text-xs text-gray-400 pt-2 w-5 shrink-0">{i + 1}.</span>
-              <textarea
-                className="flex-1 border border-gray-200 rounded-lg px-2 py-1.5 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-orange-300"
-                rows={2}
-                value={step}
-                onChange={(e) => setStep(i, e.target.value)}
-              />
-              <button
-                type="button"
-                onClick={() => setForm((f) => ({ ...f, method: f.method.filter((_, j) => j !== i) }))}
-                className="text-gray-300 hover:text-red-400 pt-1"
-              >
-                <Minus size={16} />
-              </button>
+              <textarea className="flex-1 border border-gray-200 rounded-lg px-2 py-1.5 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-orange-300"
+                rows={2} value={step}
+                onChange={(e) => setForm((f) => { const m = [...f.method]; m[i] = e.target.value; return { ...f, method: m }; })} />
+              <button type="button" onClick={() => setForm((f) => ({ ...f, method: f.method.filter((_, j) => j !== i) }))}
+                className="text-gray-300 hover:text-red-400 pt-1"><Minus size={16} /></button>
             </div>
           ))}
-          <button
-            type="button"
-            onClick={() => setForm((f) => ({ ...f, method: [...f.method, ""] }))}
-            className="text-sm text-orange-500 flex items-center gap-1 hover:text-orange-600"
-          >
+          <button type="button" onClick={() => setForm((f) => ({ ...f, method: [...f.method, ""] }))}
+            className="text-sm text-orange-500 flex items-center gap-1 hover:text-orange-600">
             <Plus size={14} /> Add step
           </button>
         </div>
@@ -292,9 +237,7 @@ export default function RecipeForm({ initial, onSave, onCancel }: Props) {
           {form.tags.map((tag) => (
             <span key={tag} className="flex items-center gap-1 text-xs bg-orange-50 text-orange-600 px-2 py-0.5 rounded-full">
               {tag}
-              <button type="button" onClick={() => setForm((f) => ({ ...f, tags: f.tags.filter((t) => t !== tag) }))}>
-                <X size={10} />
-              </button>
+              <button type="button" onClick={() => setForm((f) => ({ ...f, tags: f.tags.filter((t) => t !== tag) }))}><X size={10} /></button>
             </span>
           ))}
         </div>
@@ -313,34 +256,18 @@ export default function RecipeForm({ initial, onSave, onCancel }: Props) {
               }
             }}
           />
-          <button
-            type="button"
-            onClick={() => {
-              const t = tagInput.trim();
-              if (t && !form.tags.includes(t)) setForm((f) => ({ ...f, tags: [...f.tags, t] }));
-              setTagInput("");
-            }}
-            className="text-sm bg-gray-100 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-200"
-          >
-            Add
-          </button>
+          <button type="button"
+            onClick={() => { const t = tagInput.trim(); if (t && !form.tags.includes(t)) setForm((f) => ({ ...f, tags: [...f.tags, t] })); setTagInput(""); }}
+            className="text-sm bg-gray-100 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-200">Add</button>
         </div>
       </div>
 
       {/* Actions */}
       <div className="flex gap-3 pt-2">
-        <button
-          type="button"
-          onClick={onCancel}
-          className="flex-1 border border-gray-200 text-gray-600 py-2.5 rounded-xl text-sm hover:bg-gray-50"
-        >
-          Cancel
-        </button>
-        <button
-          type="submit"
-          disabled={saving}
-          className="flex-1 bg-orange-500 text-white py-2.5 rounded-xl text-sm font-medium hover:bg-orange-600 disabled:opacity-50 transition-colors"
-        >
+        <button type="button" onClick={onCancel}
+          className="flex-1 border border-gray-200 text-gray-600 py-2.5 rounded-xl text-sm hover:bg-gray-50">Cancel</button>
+        <button type="submit" disabled={saving}
+          className="flex-1 bg-orange-500 text-white py-2.5 rounded-xl text-sm font-medium hover:bg-orange-600 disabled:opacity-50 transition-colors">
           {saving ? "Saving..." : (initial ? "Update Recipe" : "Save Recipe")}
         </button>
       </div>
