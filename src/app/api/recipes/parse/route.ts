@@ -16,8 +16,9 @@ export async function POST(req: Request) {
   try {
     const parsed = await parseRecipe({ imageBase64, text });
     return NextResponse.json(parsed);
-  } catch (err) {
-    console.error("Recipe parse error:", err);
-    return NextResponse.json({ error: "Failed to parse recipe" }, { status: 500 });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("Recipe parse error:", msg);
+    return NextResponse.json({ error: `Failed to parse recipe: ${msg}` }, { status: 500 });
   }
 }

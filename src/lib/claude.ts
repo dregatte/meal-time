@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { ParsedRecipe } from "@/types";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-const MODEL = "claude-haiku-4-5-20251001";
+const MODEL = "claude-haiku-4-5-20251001" as const;
 
 const RECIPE_SCHEMA = {
   type: "object",
@@ -71,11 +71,12 @@ export async function parseRecipe(params: {
         input_schema: RECIPE_SCHEMA as Anthropic.Tool["input_schema"],
       },
     ],
-    tool_choice: { type: "any" },
+    tool_choice: { type: "tool", name: "save_recipe" },
   });
 
   const toolUse = response.content.find((b) => b.type === "tool_use");
   if (!toolUse || toolUse.type !== "tool_use") {
+    console.error("Unexpected Claude response:", JSON.stringify(response.content));
     throw new Error("Claude did not return a structured recipe");
   }
 
