@@ -1,0 +1,46 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model Recipe {
+  id          Int       @id @default(autoincrement())
+  name        String
+  description String?
+  ingredients String    // JSON: [{name, quantity, unit}]
+  method      String    // JSON: string[] (steps)
+  prepMins    Int       @default(0)
+  cookMins    Int       @default(0)
+  servings    Int       @default(2)
+  photoBase64 String?
+  tags        String?   // comma-separated e.g. "budget,vegetarian"
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  weekSlots   WeekSlot[]
+}
+
+model InventoryItem {
+  id        Int      @id @default(autoincrement())
+  name      String
+  quantity  String?
+  status    String   @default("in_stock") // "in_stock" | "to_buy"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model WeekSlot {
+  id        Int     @id @default(autoincrement())
+  weekStart String  // ISO Monday date e.g. "2024-01-15"
+  day       String  // mon|tue|wed|thu|fri|sat|sun
+  meal      String  // lunch|dinner
+  recipeId  Int?
+  recipe    Recipe? @relation(fields: [recipeId], references: [id], onDelete: SetNull)
+  note      String?
+
+  @@unique([weekStart, day, meal])
+}
