@@ -42,6 +42,7 @@ export default function RecipeForm({ initial, onSave, onCancel }: Props) {
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [tagInput, setTagInput] = useState("");
+  const [parseError, setParseError] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
   async function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -65,19 +66,27 @@ export default function RecipeForm({ initial, onSave, onCancel }: Props) {
   async function handleParseAI() {
     if (!photoPreview && !pasteText.trim()) return;
     setParsing(true);
+    setParseError("");
     try {
       const res = await fetch("/api/recipes/parse", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ imageBase64: photoPreview, text: pasteText }),
       });
-      const parsed: ParsedRecipe = await res.json();
+      const data = await res.json();
+      if (!res.ok) {
+        setParseError(data.error ?? "Failed to parse — check you're logged in and try again.");
+        return;
+      }
+      const parsed: ParsedRecipe = data;
       setForm({
         ...parsed,
         ingredients: parsed.ingredients?.length ? parsed.ingredients : EMPTY.ingredients,
         method: parsed.method?.length ? parsed.method : EMPTY.method,
         tags: parsed.tags ?? [],
       });
+    } catch (e) {
+      setParseError("Network error — please try again.");
     } finally {
       setParsing(false);
     }
@@ -145,6 +154,9 @@ export default function RecipeForm({ initial, onSave, onCancel }: Props) {
           <Wand2 size={15} />
           {parsing ? "Parsing..." : "Parse with AI"}
         </button>
+        {parseError && (
+          <p className="text-sm text-red-500">{parseError}</p>
+        )}
       </div>
 
       {/* Name */}
